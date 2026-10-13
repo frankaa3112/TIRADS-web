@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ACR TI-RADS Thyroid Ultrasound Reporting Assistant</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Hover trigger zone at the very top of screen -->
+  <div class="header-hover-trigger" title="Hover here to show toolbar"></div>
+
+  <!-- Header (Auto-hidden, slides down on hover) -->
+  <header id="appHeader" class="app-header autohide">
+    <div class="brand-section">
+      <div class="brand-title">
+        <h1>TI-RADS Reporting Assistant</h1>
+        <p>ACR TI-RADS Thyroid Ultrasound Structured Reporting Tool</p>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button id="btnOpenTemplateModal" class="btn" title="Customize report template and section formats">
+        Edit Template
+      </button>
+      <button id="btnExportTemplate" class="btn" title="Export current template to JSON file">
+        Export Template (JSON)
+      </button>
+      <label class="btn" title="Import template from JSON file" style="margin-bottom: 0;">
+        Import Template (JSON)
+        <input type="file" id="fileImportTemplate" accept=".json" style="display: none;">
+      </label>
+      <button id="btnResetToDefault" class="btn" title="Load sample default data">
+        Load Sample
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Workspace -->
+  <main class="workspace">
+    <!-- Left Pane: Editor & TI-RADS Scoring -->
+    <section id="paneLeft" class="pane-left">
+      <!-- Tab Navigation with quick tools -->
+      <div class="tab-nav">
+        <div class="tab-nav-buttons">
+          <button class="tab-btn active" data-tab="tabNodules">Thyroid Nodules</button>
+          <button class="tab-btn" data-tab="tabOtherFindings">Other Findings</button>
+        </div>
+        <div class="tab-nav-actions">
+          <button id="btnToggleHeader" class="btn btn-sm" title="Toggle header bar visibility">
+            Menu
+          </button>
+        </div>
+      </div>
+
+      <!-- Tab 1: Thyroid Nodules -->
+      <div id="tabNodules" class="tab-pane active">
+        <!-- Nodule Input Section -->
+        <div class="editor-card">
+          <div class="card-header">
+            <h3>Nodule Input</h3>
+          </div>
+          <div class="card-body" style="padding: 0.85rem;">
+            <div id="noduleInputContainer" class="nodule-grid-layout">
+              <!-- Rendered by JS: 6-box input (Composition, Echogenicity, Echogenic Foci, Shape, Margin, Nodule Information) -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Nodule List Section (Select nodules to include in report) -->
+        <div class="editor-card">
+          <div class="card-header">
+            <h3>Nodule List (Select nodules to include in report)</h3>
+            <button id="btnClearAllNodules" class="btn btn-sm" style="color: #ef4444; border-color: #fca5a5;" title="Clear all nodules">
+              Clear All
+            </button>
+          </div>
+          <div class="card-body" style="padding: 0; overflow-x: auto;">
+            <table class="nodule-table" id="noduleListTable">
+              <thead>
+                <tr>
+                  <th style="width: 38px; text-align: center;">#</th>
+                  <th style="width: 55px; text-align: center;">Select</th>
+                  <th>Location</th>
+                  <th style="width: 90px;">Size (cm)</th>
+                  <th style="width: 75px;">Image</th>
+                  <th style="width: 65px; text-align: center;">Score</th>
+                  <th style="width: 70px; text-align: center;">Level</th>
+                  <th>Rec</th>
+                  <th style="width: 60px; text-align: center;">Action</th>
+                </tr>
+              </thead>
+              <tbody id="noduleTableBody">
+                <!-- Dynamic Nodule Rows Rendered by JS -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab 2: Other Findings (Exam & Parenchyma + Neck Lymph Nodes) -->
+      <div id="tabOtherFindings" class="tab-pane">
+        <!-- Examination & Thyroid Parenchyma Card -->
+        <div class="editor-card">
+          <div class="card-header">
+            <h3>Examination & Thyroid Parenchyma</h3>
+          </div>
+          <div class="card-body">
+            <div class="form-group">
+              <label class="form-label">Exam Title:</label>
+              <input type="text" id="inputExamTitle" class="form-control" value="B-Mode Color Doppler Ultrasonography of the thyroid:">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Thyroid parenchyma / nodule lead-in:</label>
+              <textarea id="inputParenchymaLeadIn" class="form-control" rows="2">- Thyroid nodules in bilateral lobes, characterization of the most suspicious ones is descripted below:</textarea>
+            </div>
+          </div>
+        </div>
+
+        <!-- Neck Lymph Nodes Card -->
+        <div class="editor-card">
+          <div class="card-header">
+            <h3>Neck Lymph Nodes</h3>
+          </div>
+          <div class="card-body">
+            <div class="form-group">
+              <label class="form-label">Neck Findings:</label>
+              <textarea id="inputNeckText" class="form-control" rows="3">- The size, morphology and vascularity of lymph nodes in bilateral submandibular, supraclavicular and cervical regions are unremarkable.</textarea>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Workspace Resizer Divider -->
+    <div id="workspaceResizer" class="workspace-resizer" title="Drag to adjust Report Preview width">
+      <div class="resizer-handle"></div>
+    </div>
+
+    <!-- Right Pane: Live Report Preview -->
+    <section id="paneRight" class="pane-right">
+      <div class="preview-header">
+        <div class="preview-title">
+          Live Report Preview
+        </div>
+        <div class="preview-toolbar">
+          <button id="btnCopyReport" class="btn btn-success" title="Copy report to clipboard">
+            Copy Report
+          </button>
+        </div>
+      </div>
+
+      <div class="preview-container">
+        <pre id="reportPreviewBox" class="preview-box"></pre>
+      </div>
+    </section>
+  </main>
+
+  <!-- Template Editor Modal -->
+  <div id="templateModal" class="modal-overlay">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h2>Edit Report Template (JSON)</h2>
+        <button id="btnCloseTemplateModal" class="modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">Template Name:</label>
+          <input type="text" id="tplName" class="form-control">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Thyroid Section Header:</label>
+          <input type="text" id="tplThyroidHeader" class="form-control">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Neck Section Header:</label>
+          <input type="text" id="tplNeckHeader" class="form-control">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Nodule Item Format (Body):</label>
+          <small style="color: #64748b; display: block; margin-bottom: 4px;">
+            Placeholders: <code>{level}</code>, <code>{location}</code>, <code>{size}</code>, <code>{imgNo}</code>, <code>{composition}</code>, <code>{compositionPts}</code>, <code>{echogenicity}</code>, <code>{echogenicityPts}</code>, <code>{shape}</code>, <code>{shapePts}</code>, <code>{margin}</code>, <code>{marginPts}</code>, <code>{foci}</code>, <code>{fociPts}</code>, <code>{totalPts}</code>, <code>{recommendation}</code>
+          </small>
+          <textarea id="tplNoduleItemFormat" class="form-control" rows="8" style="font-family: var(--font-mono); font-size: 0.8rem;"></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Impression Item Format:</label>
+          <textarea id="tplImpressionItemFormat" class="form-control" rows="3" style="font-family: var(--font-mono); font-size: 0.8rem;"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btnRestoreDefaultTemplate" class="btn">Reset to Default</button>
+        <button id="btnSaveTemplateChanges" class="btn btn-primary">Save & Apply</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="toastNotification" class="toast"></div>
+
+  <!-- Load Scripts -->
+  <script src="tirads-data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
