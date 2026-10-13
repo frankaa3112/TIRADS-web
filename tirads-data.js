@@ -132,5 +132,20 @@ const DEFAULT_TEMPLATE = {
       Echogenic Foci: {foci} ({fociPts})
       {level} (total score: {totalPts} points). {recommendation}`,
   impressionItemFormat: `  - Thyroid nodule ({level}) in the {location}, {size} cm in size. (Img:{imgNo})
-    >> {recommendation}`
+    >> {recommendation}`,
+  parenchymaQuickOptions: [
+    { label: "Normal Parenchyma", text: "- Both thyroid lobes are unremarkable in size and parenchymal echogenicity.", impressionText: "" },
+    { label: "Chronic Thyroiditis (Hashimoto's)", text: "- Heterogeneous and coarse parenchymal echotexture, compatible with chronic thyroiditis (Hashimoto's).", impressionText: "- Chronic thyroiditis (Hashimoto's disease)." },
+    { label: "Increased Vascularity (Thyroid Inferno)", text: "- Increased parenchymal vascularity on color Doppler (thyroid inferno pattern), suggestive of Graves' disease.", impressionText: "- Diffuse goiter with increased vascularity, consider Graves' disease." },
+    { label: "Post Right Lobectomy", text: "- Status post right thyroid lobectomy.", impressionText: "- Status post right thyroid lobectomy." },
+    { label: "Post Left Lobectomy", text: "- Status post left thyroid lobectomy.", impressionText: "- Status post left thyroid lobectomy." }
+  ],
+  neckQuickOptions: [
+    { label: "Unremarkable Cervical Nodes", text: "- The size, morphology and vascularity of lymph nodes in bilateral submandibular, supraclavicular and cervical regions are unremarkable.", impressionText: "" },
+    { label: "Benign Reactive Nodes", text: "- Benign-appearing reactive lymph nodes with fatty hilum in bilateral levels II-IV.", impressionText: "" },
+    { label: "Suspicious Node (Loss of Hilum)", text: "- Enlarged cervical lymph node with loss of fatty hilum or rounded morphology.", impressionText: "- Suspicious cervical lymphadenopathy, FNA recommended." },
+    { label: "Suspicious Node (Microcalcification/Cystic)", text: "- Cervical lymph node with cystic necrotic change or microcalcifications.", impressionText: "- Suspicious cervical lymphadenopathy with necrotic change or microcalcifications, FNA recommended." },
+    { label: "No Malignancy / Lymphadenopathy", text: "- No definite evidence of cervical lymphadenopathy or distant metastasis identified.", impressionText: "" }
+  ]
 };
+

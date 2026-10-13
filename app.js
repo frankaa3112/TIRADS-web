@@ -6,9 +6,9 @@
 // Application State
 let appState = {
   template: JSON.parse(JSON.stringify(DEFAULT_TEMPLATE)),
-  examTitle: DEFAULT_TEMPLATE.examTitle,
-  parenchymaLeadIn: DEFAULT_TEMPLATE.parenchymaLeadIn,
-  neckText: DEFAULT_TEMPLATE.neckDefaultText,
+  // Selected finding texts from Other Findings checkboxes
+  selectedThyroidFindings: [],
+  selectedNeckFindings: [],
   // Current active form input state (defaults to 0 pts)
   activeInput: {
     location: "",
@@ -26,6 +26,8 @@ let appState = {
   editingNoduleId: null,
   // Currently highlighted / selected row in table
   highlightedNoduleId: null,
+  // Current sort mode for Nodule List: null | 'image' | 'level' | 'rec'
+  sortState: null,
   // List of saved nodules
   nodules: []
 };
@@ -37,10 +39,17 @@ let noduleIdCounter = 1;
 const noduleInputContainer = document.getElementById("noduleInputContainer");
 const noduleTableBody = document.getElementById("noduleTableBody");
 const btnClearAllNodules = document.getElementById("btnClearAllNodules");
+const btnResetNoduleOrder = document.getElementById("btnResetNoduleOrder");
+const thOrderIndex = document.getElementById("thOrderIndex");
+const thSortImage = document.getElementById("thSortImage");
+const thSortLevel = document.getElementById("thSortLevel");
+const thSortRec = document.getElementById("thSortRec");
+const sortIconIndex = document.getElementById("sortIconIndex");
+const sortIconImage = document.getElementById("sortIconImage");
+const sortIconLevel = document.getElementById("sortIconLevel");
+const sortIconRec = document.getElementById("sortIconRec");
 const reportPreviewBox = document.getElementById("reportPreviewBox");
-const inputExamTitle = document.getElementById("inputExamTitle");
-const inputParenchymaLeadIn = document.getElementById("inputParenchymaLeadIn");
-const inputNeckText = document.getElementById("inputNeckText");
+
 const btnCopyReport = document.getElementById("btnCopyReport");
 const btnOpenTemplateModal = document.getElementById("btnOpenTemplateModal");
 const btnCloseTemplateModal = document.getElementById("btnCloseTemplateModal");
@@ -54,18 +63,46 @@ const toastEl = document.getElementById("toastNotification");
 
 // Modal fields
 const tplName = document.getElementById("tplName");
+const tplExamTitle = document.getElementById("tplExamTitle");
 const tplThyroidHeader = document.getElementById("tplThyroidHeader");
+const tplParenchymaLeadIn = document.getElementById("tplParenchymaLeadIn");
 const tplNeckHeader = document.getElementById("tplNeckHeader");
 const tplNoduleItemFormat = document.getElementById("tplNoduleItemFormat");
 const tplImpressionItemFormat = document.getElementById("tplImpressionItemFormat");
+
+// Other Findings Quick Options Containers & Add Buttons
+const parenchymaQuickOptionsContainer = document.getElementById("parenchymaQuickOptionsContainer");
+const neckQuickOptionsContainer = document.getElementById("neckQuickOptionsContainer");
+const btnAddThyroidOption = document.getElementById("btnAddThyroidOption");
+const btnAddNeckOption = document.getElementById("btnAddNeckOption");
+
+// Chip Context Menu Elements
+const chipContextMenu = document.getElementById("chipContextMenu");
+const menuItemEditOption = document.getElementById("menuItemEditOption");
+const menuItemRemoveOption = document.getElementById("menuItemRemoveOption");
+
+// Option Edit/Add Modal Elements
+const optionModal = document.getElementById("optionModal");
+const optionModalTitle = document.getElementById("optionModalTitle");
+const btnCloseOptionModal = document.getElementById("btnCloseOptionModal");
+const btnCancelOptionModal = document.getElementById("btnCancelOptionModal");
+const btnSaveOptionModal = document.getElementById("btnSaveOptionModal");
+const inputOptionLabel = document.getElementById("inputOptionLabel");
+const inputOptionText = document.getElementById("inputOptionText");
+const inputOptionImpression = document.getElementById("inputOptionImpression");
+
+// Context state
+let activeContextMenuContext = null; // { groupKey, index, opt }
+let activeOptionModalState = null;   // { mode: 'edit'|'add', groupKey, index, opt }
+
 
 /**
  * Initialize Application Data (Default nodule list is empty)
  */
 function initializeData(loadSampleNodule = false) {
-  appState.examTitle = DEFAULT_TEMPLATE.examTitle;
-  appState.parenchymaLeadIn = DEFAULT_TEMPLATE.parenchymaLeadIn;
-  appState.neckText = DEFAULT_TEMPLATE.neckDefaultText;
+  // Reset findings selections (empty by default)
+  appState.selectedThyroidFindings = [];
+  appState.selectedNeckFindings = [];
   
   if (loadSampleNodule) {
     // Sample nodule matching example: TR4, left lower pole, 1.6 cm, Img:17, Suggest FNA
@@ -94,15 +131,270 @@ function initializeData(loadSampleNodule = false) {
   // Reset active input form to defaults (0 pts)
   resetActiveInput();
 
-  // Update form inputs
-  inputExamTitle.value = appState.examTitle;
-  inputParenchymaLeadIn.value = appState.parenchymaLeadIn;
-  inputNeckText.value = appState.neckText;
+  // Reset sorting state
+  appState.sortState = null;
+  updateSortHeaderUI();
 
   renderNoduleInput();
   renderNoduleTable();
+  renderQuickOptions();
   updateReportPreview();
 }
+
+/**
+ * Parse multi-line options string into array of { label, text }
+ * Supports: "Label | - Report Text" or "- Plain Text"
+ */
+function parseOptionsText(text) {
+  if (!text) return [];
+  const lines = text.split("\n");
+  const options = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (trimmed.includes("|")) {
+      const parts = trimmed.split("|");
+      const label = parts[0].trim();
+      const val = parts.slice(1).join("|").trim();
+      if (val) {
+        options.push({ label: label || val, text: val });
+      }
+    } else {
+      let label = trimmed.replace(/^[-*•\s]+/, "");
+      if (label.length > 32) label = label.substring(0, 29) + "...";
+      options.push({ label: label || trimmed, text: trimmed });
+    }
+  }
+  return options;
+}
+
+/**
+ * Format array of { label, text } into multi-line string "label | text"
+ */
+function formatOptionsToText(options) {
+  if (!Array.isArray(options)) return "";
+  return options.map(opt => `${opt.label} | ${opt.text}`).join("\n");
+}
+
+/**
+ * Render Quick Options Checkboxes for Thyroid & Neck findings
+ */
+function renderQuickOptions() {
+  const pOpts = appState.template.parenchymaQuickOptions || DEFAULT_TEMPLATE.parenchymaQuickOptions;
+  const nOpts = appState.template.neckQuickOptions || DEFAULT_TEMPLATE.neckQuickOptions;
+
+  renderQuickOptionGroup(parenchymaQuickOptionsContainer, "parenchyma", pOpts, appState.selectedThyroidFindings, () => {
+    updateReportPreview();
+  });
+  renderQuickOptionGroup(neckQuickOptionsContainer, "neck", nOpts, appState.selectedNeckFindings, () => {
+    updateReportPreview();
+  });
+}
+
+/**
+ * Render a single quick option group into a container
+ */
+function renderQuickOptionGroup(container, groupKey, options, selectedList, onChangeCallback) {
+  if (!container) return;
+  container.innerHTML = "";
+  if (!options || options.length === 0) {
+    container.innerHTML = `<span style="color: #94a3b8; font-size: 0.75rem;">No options defined. Click "+ Add Option" above to create one.</span>`;
+    return;
+  }
+
+  options.forEach((opt, index) => {
+    const optText = (opt.text || "").trim();
+    const isChecked = selectedList.includes(optText);
+
+    const chip = document.createElement("label");
+    chip.className = `quick-option-chip ${isChecked ? 'checked' : ''}`;
+    chip.title = `${opt.text}\n(Right-click to Edit or Remove)`;
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = isChecked;
+
+    const labelSpan = document.createElement("span");
+    labelSpan.textContent = opt.label;
+
+    checkbox.addEventListener("change", (e) => {
+      e.stopPropagation();
+      if (checkbox.checked) {
+        if (!selectedList.includes(optText)) {
+          selectedList.push(optText);
+        }
+      } else {
+        const idx = selectedList.indexOf(optText);
+        if (idx > -1) {
+          selectedList.splice(idx, 1);
+        }
+      }
+      chip.classList.toggle("checked", checkbox.checked);
+      if (onChangeCallback) onChangeCallback();
+    });
+
+    // Right-click contextmenu event
+    chip.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      showChipContextMenu(e.clientX, e.clientY, groupKey, index, opt);
+    });
+
+    chip.appendChild(checkbox);
+    chip.appendChild(labelSpan);
+    container.appendChild(chip);
+  });
+}
+
+/**
+ * Show Right-Click Context Menu at mouse coordinates
+ */
+function showChipContextMenu(x, y, groupKey, index, opt) {
+  activeContextMenuContext = { groupKey, index, opt };
+  if (!chipContextMenu) return;
+
+  chipContextMenu.style.display = "block";
+
+  const menuWidth = 140;
+  const menuHeight = 70;
+  const winWidth = window.innerWidth || 1200;
+  const winHeight = window.innerHeight || 800;
+
+  let left = x;
+  let top = y;
+  if (left + menuWidth > winWidth) left = Math.max(0, winWidth - menuWidth - 8);
+  if (top + menuHeight > winHeight) top = Math.max(0, winHeight - menuHeight - 8);
+
+  chipContextMenu.style.left = `${left}px`;
+  chipContextMenu.style.top = `${top}px`;
+}
+
+/**
+ * Hide Right-Click Context Menu
+ */
+function hideChipContextMenu() {
+  if (chipContextMenu) {
+    chipContextMenu.style.display = "none";
+  }
+}
+
+/**
+ * Open Option Edit / Add Modal
+ */
+function openOptionModal(mode, groupKey, index = -1, opt = null) {
+  activeOptionModalState = { mode, groupKey, index, opt };
+  const groupLabel = groupKey === "parenchyma" ? "Thyroid" : "Neck";
+
+  if (!optionModal) return;
+
+  if (mode === "edit" && opt) {
+    optionModalTitle.textContent = `Edit Option (${groupLabel})`;
+    inputOptionLabel.value = opt.label || "";
+    inputOptionText.value = opt.text || "";
+    if (inputOptionImpression) inputOptionImpression.value = opt.impressionText || "";
+  } else {
+    optionModalTitle.textContent = `Add Option (${groupLabel})`;
+    inputOptionLabel.value = "";
+    inputOptionText.value = "";
+    if (inputOptionImpression) inputOptionImpression.value = "";
+  }
+
+  optionModal.classList.add("active");
+  if (inputOptionLabel) inputOptionLabel.focus();
+}
+
+/**
+ * Close Option Modal
+ */
+function closeOptionModal() {
+  if (optionModal) {
+    optionModal.classList.remove("active");
+  }
+  activeOptionModalState = null;
+}
+
+/**
+ * Save Option Modal Changes (Add or Edit)
+ */
+function saveOptionModal() {
+  if (!activeOptionModalState) return;
+  const { mode, groupKey, index, opt } = activeOptionModalState;
+  const label = inputOptionLabel ? inputOptionLabel.value.trim() : "";
+  const text = inputOptionText ? inputOptionText.value.trim() : "";
+  const impressionText = inputOptionImpression ? inputOptionImpression.value.trim() : "";
+
+  if (!label) {
+    showToast("Please enter an option label", "error");
+    if (inputOptionLabel) inputOptionLabel.focus();
+    return;
+  }
+  if (!text) {
+    showToast("Please enter report text", "error");
+    if (inputOptionText) inputOptionText.focus();
+    return;
+  }
+
+  const propKey = groupKey === "parenchyma" ? "parenchymaQuickOptions" : "neckQuickOptions";
+  if (!appState.template[propKey]) {
+    appState.template[propKey] = [];
+  }
+
+  const selectedList = groupKey === "parenchyma" ? appState.selectedThyroidFindings : appState.selectedNeckFindings;
+
+  if (mode === "edit") {
+    const oldText = (opt && opt.text) ? opt.text.trim() : "";
+    appState.template[propKey][index] = { label, text, impressionText };
+
+    // Update selectedList if the edited option was previously checked
+    if (oldText && selectedList.includes(oldText)) {
+      const selIdx = selectedList.indexOf(oldText);
+      selectedList[selIdx] = text;
+    }
+    showToast(`Option "${label}" updated!`, "success");
+  } else {
+    // Add mode
+    appState.template[propKey].push({ label, text, impressionText });
+    showToast(`Option "${label}" added!`, "success");
+  }
+
+  // Persist template changes
+  localStorage.setItem("tirads_user_template", JSON.stringify(appState.template));
+
+  renderQuickOptions();
+  updateReportPreview();
+  closeOptionModal();
+}
+
+/**
+ * Remove an Option from the template and selected list
+ */
+function removeOption(groupKey, index, opt) {
+  const propKey = groupKey === "parenchyma" ? "parenchymaQuickOptions" : "neckQuickOptions";
+  if (!appState.template[propKey]) return;
+
+  const optText = (opt && opt.text) ? opt.text.trim() : "";
+  const selectedList = groupKey === "parenchyma" ? appState.selectedThyroidFindings : appState.selectedNeckFindings;
+
+  // Remove from template options
+  appState.template[propKey].splice(index, 1);
+
+  // If selected, remove from selected findings
+  if (optText) {
+    const selIdx = selectedList.indexOf(optText);
+    if (selIdx > -1) {
+      selectedList.splice(selIdx, 1);
+    }
+  }
+
+  // Persist template changes
+  localStorage.setItem("tirads_user_template", JSON.stringify(appState.template));
+
+  renderQuickOptions();
+  updateReportPreview();
+  showToast(`Option "${opt.label}" removed`, "info");
+}
+
+
 
 /**
  * Toast Notification Helper
@@ -228,6 +520,11 @@ function saveActiveNodule() {
     showToast(`Added Nodule #${appState.nodules.length} to list`, "info");
   }
 
+  // Re-apply active sort if any
+  if (appState.sortState) {
+    reapplyCurrentSort();
+  }
+
   renderNoduleInput();
   renderNoduleTable();
   updateReportPreview();
@@ -304,6 +601,261 @@ function calculateNoduleScore(nodule) {
     parsedSize: sizeParsed
   };
 }
+
+/**
+ * Check if a nodule recommendation suggests biopsy / FNA
+ */
+function isBiopsyRecommended(score) {
+  if (!score || !score.recommendation) return false;
+  const rec = score.recommendation.toLowerCase();
+  if (rec.includes("no fna") || rec.includes("no biopsy")) return false;
+  return rec.includes("fna") || rec.includes("biopsy");
+}
+
+/**
+ * Extract numerical TI-RADS level (e.g. "TR5" -> 5, "TR4" -> 4)
+ */
+function getTRLevelNumber(levelStr) {
+  const match = String(levelStr || "").match(/TR(\d+)/i);
+  return match ? parseInt(match[1], 10) : 0;
+}
+
+/**
+ * Sort nodules for Impression section according to:
+ * 1. Needs biopsy lesion first (Suggest FNA / Biopsy)
+ * 2. TI-RADS category descending (TR5 > TR4 > TR3 > TR2 > TR1)
+ * 3. Size (max dimension) descending
+ * 4. Original input order as tie-breaker
+ */
+function sortNodulesForImpression(nodules) {
+  return [...nodules]
+    .map((nodule, index) => ({
+      nodule,
+      score: calculateNoduleScore(nodule),
+      originalIndex: index
+    }))
+    .sort((a, b) => {
+      const aBiopsy = isBiopsyRecommended(a.score);
+      const bBiopsy = isBiopsyRecommended(b.score);
+
+      // 1. Needs biopsy lesion first
+      if (aBiopsy !== bBiopsy) {
+        return aBiopsy ? -1 : 1;
+      }
+
+      // 2. TI-RADS Level descending (TR5 > TR4 > TR3...)
+      const aLevel = getTRLevelNumber(a.score.level);
+      const bLevel = getTRLevelNumber(b.score.level);
+      if (aLevel !== bLevel) {
+        return bLevel - aLevel;
+      }
+
+      // 3. Size descending (e.g. 2.5cm > 1.5cm)
+      const aSize = a.score.parsedSize.maxDimension || 0;
+      const bSize = b.score.parsedSize.maxDimension || 0;
+      if (aSize !== bSize) {
+        return bSize - aSize;
+      }
+
+      // 4. Stable tie-breaker
+      return a.originalIndex - b.originalIndex;
+    });
+}
+
+/**
+ * Parse image number (extract first integer from string)
+ */
+function parseImageNumber(imgStr) {
+  if (imgStr === null || imgStr === undefined || imgStr === "") return null;
+  const match = String(imgStr).match(/\d+/);
+  return match ? parseInt(match[0], 10) : null;
+}
+
+/**
+ * Get recommendation rank: 1: FNA/Biopsy -> 2: Follow-up -> 3: Nil/No FNA
+ */
+function getRecRank(score) {
+  if (isBiopsyRecommended(score)) {
+    return 1;
+  }
+  const rec = (score.recommendation || "").toLowerCase();
+  if (rec.includes("follow-up") || rec.includes("follow up")) {
+    return 2;
+  }
+  return 3;
+}
+
+/**
+ * Sort nodules in Nodule List by Image (ascending: small to large)
+ */
+function sortNodulesByImage() {
+  appState.nodules.sort((a, b) => {
+    const numA = parseImageNumber(a.imgNo);
+    const numB = parseImageNumber(b.imgNo);
+
+    if (numA !== null && numB !== null) {
+      if (numA !== numB) return numA - numB;
+    } else if (numA !== null && numB === null) {
+      return -1;
+    } else if (numA === null && numB !== null) {
+      return 1;
+    } else {
+      const strA = String(a.imgNo || "").trim();
+      const strB = String(b.imgNo || "").trim();
+      if (strA || strB) {
+        const cmp = strA.localeCompare(strB, undefined, { numeric: true, sensitivity: "base" });
+        if (cmp !== 0) return cmp;
+      }
+    }
+    return a.id - b.id;
+  });
+}
+
+/**
+ * Sort nodules in Nodule List by Level (descending: TR5 > TR4 > TR3 > TR2 > TR1)
+ */
+function sortNodulesByLevel() {
+  appState.nodules.sort((a, b) => {
+    const scoreA = calculateNoduleScore(a);
+    const scoreB = calculateNoduleScore(b);
+    const levelA = getTRLevelNumber(scoreA.level);
+    const levelB = getTRLevelNumber(scoreB.level);
+
+    if (levelA !== levelB) {
+      return levelB - levelA;
+    }
+    if (scoreA.totalPoints !== scoreB.totalPoints) {
+      return scoreB.totalPoints - scoreA.totalPoints;
+    }
+    const sizeA = scoreA.parsedSize.maxDimension || 0;
+    const sizeB = scoreB.parsedSize.maxDimension || 0;
+    if (sizeA !== sizeB) {
+      return sizeB - sizeA;
+    }
+    return a.id - b.id;
+  });
+}
+
+/**
+ * Sort nodules in Nodule List by Rec (FNA -> follow up -> nil)
+ */
+function sortNodulesByRec() {
+  appState.nodules.sort((a, b) => {
+    const scoreA = calculateNoduleScore(a);
+    const scoreB = calculateNoduleScore(b);
+    const rankA = getRecRank(scoreA);
+    const rankB = getRecRank(scoreB);
+
+    if (rankA !== rankB) {
+      return rankA - rankB;
+    }
+    const levelA = getTRLevelNumber(scoreA.level);
+    const levelB = getTRLevelNumber(scoreB.level);
+    if (levelA !== levelB) {
+      return levelB - levelA;
+    }
+    const sizeA = scoreA.parsedSize.maxDimension || 0;
+    const sizeB = scoreB.parsedSize.maxDimension || 0;
+    if (sizeA !== sizeB) {
+      return sizeB - sizeA;
+    }
+    return a.id - b.id;
+  });
+}
+
+/**
+ * Reset nodules back to original creation order (by nodule.id)
+ */
+function resetNoduleOrder(silent = false) {
+  appState.sortState = null;
+  appState.nodules.sort((a, b) => a.id - b.id);
+  updateSortHeaderUI();
+  renderNoduleTable();
+  updateReportPreview();
+  if (!silent) {
+    showToast("已恢復原本新增順序", "info");
+  }
+}
+
+/**
+ * Apply or toggle column sort
+ */
+function applyColumnSort(type) {
+  if (appState.sortState === type) {
+    // Click again to cycle back to original order
+    resetNoduleOrder();
+    return;
+  }
+
+  appState.sortState = type;
+  if (type === "image") {
+    sortNodulesByImage();
+    showToast("已依 Image 由小到大排序", "info");
+  } else if (type === "level") {
+    sortNodulesByLevel();
+    showToast("已依 Level 由高到低排序", "info");
+  } else if (type === "rec") {
+    sortNodulesByRec();
+    showToast("已依 Rec (FNA → Follow-up → Nil) 排序", "info");
+  }
+
+  updateSortHeaderUI();
+  renderNoduleTable();
+  updateReportPreview();
+}
+
+/**
+ * Re-apply current sort if active
+ */
+function reapplyCurrentSort() {
+  if (appState.sortState === "image") {
+    sortNodulesByImage();
+  } else if (appState.sortState === "level") {
+    sortNodulesByLevel();
+  } else if (appState.sortState === "rec") {
+    sortNodulesByRec();
+  }
+}
+
+/**
+ * Update table header active state and sort arrow icons
+ */
+function updateSortHeaderUI() {
+  const btnReset = document.getElementById("btnResetNoduleOrder");
+  const thOrder = document.getElementById("thOrderIndex");
+  const thImg = document.getElementById("thSortImage");
+  const thLvl = document.getElementById("thSortLevel");
+  const thR = document.getElementById("thSortRec");
+
+  const iconIndex = document.getElementById("sortIconIndex");
+  const iconImg = document.getElementById("sortIconImage");
+  const iconLvl = document.getElementById("sortIconLevel");
+  const iconRec = document.getElementById("sortIconRec");
+
+  [thOrder, thImg, thLvl, thR].forEach(th => th && th.classList.remove("active-sort"));
+  if (iconIndex) iconIndex.textContent = "";
+  if (iconImg) iconImg.textContent = "";
+  if (iconLvl) iconLvl.textContent = "";
+  if (iconRec) iconRec.textContent = "";
+
+  if (appState.sortState === "image") {
+    if (thImg) thImg.classList.add("active-sort");
+    if (iconImg) iconImg.textContent = "▲";
+    if (btnReset) btnReset.style.display = "inline-flex";
+  } else if (appState.sortState === "level") {
+    if (thLvl) thLvl.classList.add("active-sort");
+    if (iconLvl) iconLvl.textContent = "▼";
+    if (btnReset) btnReset.style.display = "inline-flex";
+  } else if (appState.sortState === "rec") {
+    if (thR) thR.classList.add("active-sort");
+    if (iconRec) iconRec.textContent = "▼";
+    if (btnReset) btnReset.style.display = "inline-flex";
+  } else {
+    if (btnReset) btnReset.style.display = "none";
+  }
+}
+
+
 
 /**
  * Render the top 6-box Nodule Input form
@@ -486,20 +1038,33 @@ function generateStructuredReport() {
   // Filter only checked/selected nodules
   const selectedNodules = appState.nodules.filter(n => n.selected);
 
-  // 1. Exam Title
-  if (appState.examTitle.trim()) {
-    reportLines.push(appState.examTitle.trim());
+  // 1. Exam Title (from template)
+  const examTitle = (tpl.examTitle !== undefined ? tpl.examTitle : DEFAULT_TEMPLATE.examTitle) || "";
+  if (examTitle.trim()) {
+    reportLines.push(examTitle.trim());
     reportLines.push("");
   }
 
   // 2. Thyroid Section
   reportLines.push(tpl.thyroidSectionHeader);
-  if (appState.parenchymaLeadIn.trim()) {
-    reportLines.push("  " + appState.parenchymaLeadIn.trim());
+
+  // Thyroid Findings (from selected checkboxes)
+  if (appState.selectedThyroidFindings && appState.selectedThyroidFindings.length > 0) {
+    appState.selectedThyroidFindings.forEach(text => {
+      const trimmed = text.trim();
+      if (trimmed) {
+        reportLines.push("  " + trimmed);
+      }
+    });
   }
 
   // 3. Format Nodules
   if (selectedNodules.length > 0) {
+    const leadIn = (tpl.parenchymaLeadIn !== undefined ? tpl.parenchymaLeadIn : DEFAULT_TEMPLATE.parenchymaLeadIn) || "";
+    if (leadIn.trim()) {
+      reportLines.push("  " + leadIn.trim());
+    }
+
     selectedNodules.forEach(nodule => {
       const score = calculateNoduleScore(nodule);
 
@@ -535,16 +1100,19 @@ function generateStructuredReport() {
 
       reportLines.push(noduleStr);
     });
-  } else {
-    reportLines.push("    - No focal suspicious nodule identified.");
   }
 
   reportLines.push("");
 
   // 4. Neck Section
   reportLines.push(tpl.neckSectionHeader);
-  if (appState.neckText.trim()) {
-    reportLines.push("  " + appState.neckText.trim());
+  if (appState.selectedNeckFindings && appState.selectedNeckFindings.length > 0) {
+    appState.selectedNeckFindings.forEach(text => {
+      const trimmed = text.trim();
+      if (trimmed) {
+        reportLines.push("  " + trimmed);
+      }
+    });
   }
   reportLines.push("");
 
@@ -553,8 +1121,8 @@ function generateStructuredReport() {
     reportLines.push(tpl.impressionHeader);
 
     if (selectedNodules.length > 0) {
-      selectedNodules.forEach(nodule => {
-        const score = calculateNoduleScore(nodule);
+      const sortedImpressionNodules = sortNodulesForImpression(selectedNodules);
+      sortedImpressionNodules.forEach(({ nodule, score }) => {
         const rec = score.recommendation;
         const isNoFnaBySize = !rec || rec === "No FNA recommended by size criteria." || rec === "No FNA needed.";
 
@@ -574,8 +1142,39 @@ function generateStructuredReport() {
 
         reportLines.push(impStr);
       });
-    } else {
-      reportLines.push("  - No definite evidence of thyroid malignancy.");
+    }
+
+    // Findings' Impression (from selected Thyroid & Neck options)
+    const pOpts = appState.template.parenchymaQuickOptions || DEFAULT_TEMPLATE.parenchymaQuickOptions || [];
+    if (appState.selectedThyroidFindings && appState.selectedThyroidFindings.length > 0) {
+      appState.selectedThyroidFindings.forEach(text => {
+        const matched = pOpts.find(o => (o.text || "").trim() === text.trim());
+        if (matched && matched.impressionText && matched.impressionText.trim()) {
+          const lines = matched.impressionText.trim().split("\n");
+          lines.forEach(line => {
+            const trimmed = line.trim();
+            if (trimmed) {
+              reportLines.push("  " + trimmed);
+            }
+          });
+        }
+      });
+    }
+
+    const nOpts = appState.template.neckQuickOptions || DEFAULT_TEMPLATE.neckQuickOptions || [];
+    if (appState.selectedNeckFindings && appState.selectedNeckFindings.length > 0) {
+      appState.selectedNeckFindings.forEach(text => {
+        const matched = nOpts.find(o => (o.text || "").trim() === text.trim());
+        if (matched && matched.impressionText && matched.impressionText.trim()) {
+          const lines = matched.impressionText.trim().split("\n");
+          lines.forEach(line => {
+            const trimmed = line.trim();
+            if (trimmed) {
+              reportLines.push("  " + trimmed);
+            }
+          });
+        }
+      });
     }
   }
 
@@ -638,21 +1237,6 @@ function updateReportPreview() {
 // Event Listeners
 // ==========================================
 
-// Global Inputs Change
-inputExamTitle.addEventListener("input", (e) => {
-  appState.examTitle = e.target.value;
-  updateReportPreview();
-});
-
-inputParenchymaLeadIn.addEventListener("input", (e) => {
-  appState.parenchymaLeadIn = e.target.value;
-  updateReportPreview();
-});
-
-inputNeckText.addEventListener("input", (e) => {
-  appState.neckText = e.target.value;
-  updateReportPreview();
-});
 
 // Nodule Input Container Delegated Events (Radio, Checkbox, Text Inputs, Buttons)
 noduleInputContainer.addEventListener("change", (e) => {
@@ -777,11 +1361,45 @@ function deleteNoduleById(id) {
   }
 }
 
+// Reset Nodule Order Button
+if (btnResetNoduleOrder) {
+  btnResetNoduleOrder.addEventListener("click", () => {
+    resetNoduleOrder();
+  });
+}
+
+// Table Header Sorting Event Listeners
+if (thOrderIndex) {
+  thOrderIndex.addEventListener("click", () => {
+    resetNoduleOrder();
+  });
+}
+
+if (thSortImage) {
+  thSortImage.addEventListener("click", () => {
+    applyColumnSort("image");
+  });
+}
+
+if (thSortLevel) {
+  thSortLevel.addEventListener("click", () => {
+    applyColumnSort("level");
+  });
+}
+
+if (thSortRec) {
+  thSortRec.addEventListener("click", () => {
+    applyColumnSort("rec");
+  });
+}
+
 // Clear All Nodules Button
 btnClearAllNodules.addEventListener("click", () => {
   if (appState.nodules.length === 0) return;
   if (confirm("Are you sure you want to clear all nodules?")) {
     appState.nodules = [];
+    appState.sortState = null;
+    updateSortHeaderUI();
     resetActiveInput();
     appState.highlightedNoduleId = null;
     renderNoduleInput();
@@ -882,16 +1500,121 @@ btnResetToDefault.addEventListener("click", () => {
 });
 
 // ==========================================
+// Context Menu & Option Modal Event Listeners
+// ==========================================
+
+// Global click to close context menu
+document.addEventListener("click", () => {
+  hideChipContextMenu();
+});
+
+// Global contextmenu to close existing context menu when clicked elsewhere
+document.addEventListener("contextmenu", (e) => {
+  if (!e.target.closest || !e.target.closest(".quick-option-chip")) {
+    hideChipContextMenu();
+  }
+});
+
+// Context Menu: Edit Option
+if (menuItemEditOption) {
+  menuItemEditOption.addEventListener("click", () => {
+    hideChipContextMenu();
+    if (activeContextMenuContext) {
+      openOptionModal("edit", activeContextMenuContext.groupKey, activeContextMenuContext.index, activeContextMenuContext.opt);
+    }
+  });
+}
+
+// Context Menu: Remove Option
+if (menuItemRemoveOption) {
+  menuItemRemoveOption.addEventListener("click", () => {
+    hideChipContextMenu();
+    if (activeContextMenuContext) {
+      const { groupKey, index, opt } = activeContextMenuContext;
+      if (confirm(`Remove option "${opt.label}"?`)) {
+        removeOption(groupKey, index, opt);
+      }
+    }
+  });
+}
+
+// Add Option Buttons
+if (btnAddThyroidOption) {
+  btnAddThyroidOption.addEventListener("click", () => {
+    openOptionModal("add", "parenchyma");
+  });
+}
+
+if (btnAddNeckOption) {
+  btnAddNeckOption.addEventListener("click", () => {
+    openOptionModal("add", "neck");
+  });
+}
+
+// Close & Cancel Option Modal
+if (btnCloseOptionModal) {
+  btnCloseOptionModal.addEventListener("click", () => {
+    closeOptionModal();
+  });
+}
+
+if (btnCancelOptionModal) {
+  btnCancelOptionModal.addEventListener("click", () => {
+    closeOptionModal();
+  });
+}
+
+// Save Option Modal
+if (btnSaveOptionModal) {
+  btnSaveOptionModal.addEventListener("click", () => {
+    saveOptionModal();
+  });
+}
+
+// Enter key shortcut in Option Label input
+if (inputOptionLabel) {
+  inputOptionLabel.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      if (inputOptionText) inputOptionText.focus();
+    }
+  });
+}
+
+// Ctrl+Enter or Cmd+Enter shortcut in Option Text textarea
+if (inputOptionText) {
+  inputOptionText.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      saveOptionModal();
+    }
+  });
+}
+
+// Ctrl+Enter or Cmd+Enter shortcut in Option Impression textarea
+if (inputOptionImpression) {
+  inputOptionImpression.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      saveOptionModal();
+    }
+  });
+}
+
+// ==========================================
 // Template Management (JSON Import / Export / Modal)
 // ==========================================
 
 // Open Modal
 btnOpenTemplateModal.addEventListener("click", () => {
   tplName.value = appState.template.templateName || "Standard Template";
+  if (tplExamTitle) tplExamTitle.value = appState.template.examTitle || DEFAULT_TEMPLATE.examTitle || "";
   tplThyroidHeader.value = appState.template.thyroidSectionHeader;
+  if (tplParenchymaLeadIn) tplParenchymaLeadIn.value = appState.template.parenchymaLeadIn || DEFAULT_TEMPLATE.parenchymaLeadIn || "";
   tplNeckHeader.value = appState.template.neckSectionHeader;
   tplNoduleItemFormat.value = appState.template.noduleItemFormat;
   tplImpressionItemFormat.value = appState.template.impressionItemFormat;
+
   templateModal.classList.add("active");
 });
 
@@ -903,7 +1626,9 @@ btnCloseTemplateModal.addEventListener("click", () => {
 // Save Modal Changes
 btnSaveTemplateChanges.addEventListener("click", () => {
   appState.template.templateName = tplName.value.trim();
+  if (tplExamTitle) appState.template.examTitle = tplExamTitle.value.trim();
   appState.template.thyroidSectionHeader = tplThyroidHeader.value.trim();
+  if (tplParenchymaLeadIn) appState.template.parenchymaLeadIn = tplParenchymaLeadIn.value.trim();
   appState.template.neckSectionHeader = tplNeckHeader.value.trim();
   appState.template.noduleItemFormat = tplNoduleItemFormat.value;
   appState.template.impressionItemFormat = tplImpressionItemFormat.value;
@@ -911,6 +1636,7 @@ btnSaveTemplateChanges.addEventListener("click", () => {
   // Save to LocalStorage
   localStorage.setItem("tirads_user_template", JSON.stringify(appState.template));
 
+  renderQuickOptions();
   templateModal.classList.remove("active");
   updateReportPreview();
   showToast("Template changes saved and applied!", "success");
@@ -921,11 +1647,15 @@ btnRestoreDefaultTemplate.addEventListener("click", () => {
   if (confirm("Restore to default standard template?")) {
     appState.template = JSON.parse(JSON.stringify(DEFAULT_TEMPLATE));
     tplName.value = appState.template.templateName;
+    if (tplExamTitle) tplExamTitle.value = DEFAULT_TEMPLATE.examTitle;
     tplThyroidHeader.value = appState.template.thyroidSectionHeader;
+    if (tplParenchymaLeadIn) tplParenchymaLeadIn.value = DEFAULT_TEMPLATE.parenchymaLeadIn;
     tplNeckHeader.value = appState.template.neckSectionHeader;
     tplNoduleItemFormat.value = appState.template.noduleItemFormat;
     tplImpressionItemFormat.value = appState.template.impressionItemFormat;
+
     localStorage.removeItem("tirads_user_template");
+    renderQuickOptions();
     updateReportPreview();
     showToast("Restored to default template", "info");
   }
@@ -956,8 +1686,15 @@ fileImportTemplate.addEventListener("change", (event) => {
       if (!importedData.noduleItemFormat || !importedData.thyroidSectionHeader) {
         throw new Error("Template missing required fields");
       }
+      if (!importedData.parenchymaQuickOptions) {
+        importedData.parenchymaQuickOptions = DEFAULT_TEMPLATE.parenchymaQuickOptions;
+      }
+      if (!importedData.neckQuickOptions) {
+        importedData.neckQuickOptions = DEFAULT_TEMPLATE.neckQuickOptions;
+      }
       appState.template = importedData;
       localStorage.setItem("tirads_user_template", JSON.stringify(importedData));
+      renderQuickOptions();
       updateReportPreview();
       showToast(`Imported template: ${importedData.templateName || file.name}`, "success");
     } catch (err) {
@@ -974,7 +1711,19 @@ function loadStoredTemplate() {
   const stored = localStorage.getItem("tirads_user_template");
   if (stored) {
     try {
-      appState.template = JSON.parse(stored);
+      const parsed = JSON.parse(stored);
+      if (!parsed.parenchymaQuickOptions) {
+        parsed.parenchymaQuickOptions = DEFAULT_TEMPLATE.parenchymaQuickOptions;
+      } else {
+        // Filter out legacy "Bilateral Nodules Lead-in" option from checkboxes
+        parsed.parenchymaQuickOptions = parsed.parenchymaQuickOptions.filter(
+          opt => opt.label !== "Bilateral Nodules Lead-in" && !opt.text.includes("Thyroid nodules in bilateral lobes")
+        );
+      }
+      if (!parsed.neckQuickOptions) {
+        parsed.neckQuickOptions = DEFAULT_TEMPLATE.neckQuickOptions;
+      }
+      appState.template = parsed;
     } catch (e) {
       console.error("Failed to parse stored template", e);
     }

@@ -70,22 +70,27 @@
         <div class="editor-card">
           <div class="card-header">
             <h3>Nodule List (Select nodules to include in report)</h3>
-            <button id="btnClearAllNodules" class="btn btn-sm" style="color: #ef4444; border-color: #fca5a5;" title="Clear all nodules">
-              Clear All
-            </button>
+            <div style="display: flex; gap: 0.4rem; align-items: center;">
+              <button id="btnResetNoduleOrder" class="btn btn-sm" style="display: none; background: #f8fafc; border-color: #cbd5e1; color: #475569;" title="恢復原本新增順序">
+                Reset Order
+              </button>
+              <button id="btnClearAllNodules" class="btn btn-sm" style="color: #ef4444; border-color: #fca5a5;" title="Clear all nodules">
+                Clear All
+              </button>
+            </div>
           </div>
           <div class="card-body" style="padding: 0; overflow-x: auto;">
             <table class="nodule-table" id="noduleListTable">
               <thead>
                 <tr>
-                  <th style="width: 38px; text-align: center;">#</th>
+                  <th id="thOrderIndex" class="sortable-th" style="width: 48px; text-align: center;" title="點擊恢復原本順序"># <span class="sort-icon" id="sortIconIndex"></span></th>
                   <th style="width: 55px; text-align: center;">Select</th>
                   <th>Location</th>
                   <th style="width: 90px;">Size (cm)</th>
-                  <th style="width: 75px;">Image</th>
+                  <th id="thSortImage" class="sortable-th" style="width: 82px;" title="點擊依 Image 由小到大排序">Image <span class="sort-icon" id="sortIconImage"></span></th>
                   <th style="width: 65px; text-align: center;">Score</th>
-                  <th style="width: 70px; text-align: center;">Level</th>
-                  <th>Rec</th>
+                  <th id="thSortLevel" class="sortable-th" style="width: 78px; text-align: center;" title="點擊依 Level 由高到低排序">Level <span class="sort-icon" id="sortIconLevel"></span></th>
+                  <th id="thSortRec" class="sortable-th" title="點擊依 Rec (FNA &rarr; follow up &rarr; nil) 排序">Rec <span class="sort-icon" id="sortIconRec"></span></th>
                   <th style="width: 60px; text-align: center;">Action</th>
                 </tr>
               </thead>
@@ -97,35 +102,27 @@
         </div>
       </div>
 
-      <!-- Tab 2: Other Findings (Exam & Parenchyma + Neck Lymph Nodes) -->
+      <!-- Tab 2: Other Findings -->
       <div id="tabOtherFindings" class="tab-pane">
-        <!-- Examination & Thyroid Parenchyma Card -->
+        <!-- Thyroid Findings Card -->
         <div class="editor-card">
-          <div class="card-header">
-            <h3>Examination & Thyroid Parenchyma</h3>
+          <div class="card-header card-header-flex">
+            <h3>Thyroid Findings</h3>
+            <button id="btnAddThyroidOption" class="btn btn-sm btn-outline" type="button" title="Add a custom thyroid option">+ Add Option</button>
           </div>
           <div class="card-body">
-            <div class="form-group">
-              <label class="form-label">Exam Title:</label>
-              <input type="text" id="inputExamTitle" class="form-control" value="B-Mode Color Doppler Ultrasonography of the thyroid:">
-            </div>
-            <div class="form-group">
-              <label class="form-label">Thyroid parenchyma / nodule lead-in:</label>
-              <textarea id="inputParenchymaLeadIn" class="form-control" rows="2">- Thyroid nodules in bilateral lobes, characterization of the most suspicious ones is descripted below:</textarea>
-            </div>
+            <div id="parenchymaQuickOptionsContainer" class="quick-options-grid"></div>
           </div>
         </div>
 
-        <!-- Neck Lymph Nodes Card -->
+        <!-- Neck Findings Card -->
         <div class="editor-card">
-          <div class="card-header">
-            <h3>Neck Lymph Nodes</h3>
+          <div class="card-header card-header-flex">
+            <h3>Neck Findings</h3>
+            <button id="btnAddNeckOption" class="btn btn-sm btn-outline" type="button" title="Add a custom neck option">+ Add Option</button>
           </div>
           <div class="card-body">
-            <div class="form-group">
-              <label class="form-label">Neck Findings:</label>
-              <textarea id="inputNeckText" class="form-control" rows="3">- The size, morphology and vascularity of lymph nodes in bilateral submandibular, supraclavicular and cervical regions are unremarkable.</textarea>
-            </div>
+            <div id="neckQuickOptionsContainer" class="quick-options-grid"></div>
           </div>
         </div>
       </div>
@@ -168,8 +165,19 @@
           <input type="text" id="tplName" class="form-control">
         </div>
         <div class="form-group">
+          <label class="form-label">Exam Title (檢查名稱):</label>
+          <input type="text" id="tplExamTitle" class="form-control">
+        </div>
+        <div class="form-group">
           <label class="form-label">Thyroid Section Header:</label>
           <input type="text" id="tplThyroidHeader" class="form-control">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Thyroid Nodule Lead-in (甲狀腺結節前言導引句):</label>
+          <small style="color: #64748b; display: block; margin-bottom: 4px;">
+            此導引句在報告中存在結節時自動顯示於結節列表上方（若無結節則不顯示）：
+          </small>
+          <textarea id="tplParenchymaLeadIn" class="form-control" rows="2"></textarea>
         </div>
         <div class="form-group">
           <label class="form-label">Neck Section Header:</label>
@@ -190,6 +198,49 @@
       <div class="modal-footer">
         <button id="btnRestoreDefaultTemplate" class="btn">Reset to Default</button>
         <button id="btnSaveTemplateChanges" class="btn btn-primary">Save & Apply</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Option Context Menu (Right Click) -->
+  <div id="chipContextMenu" class="context-menu" style="display: none;">
+    <div class="context-menu-item" id="menuItemEditOption">
+      <span class="context-menu-icon">✏️</span>
+      <span>Edit</span>
+    </div>
+    <div class="context-menu-item danger" id="menuItemRemoveOption">
+      <span class="context-menu-icon">🗑️</span>
+      <span>Remove</span>
+    </div>
+  </div>
+
+  <!-- Option Edit / Add Modal -->
+  <div id="optionModal" class="modal-overlay">
+    <div class="modal-dialog modal-dialog-sm">
+      <div class="modal-header">
+        <h2 id="optionModalTitle">Edit Option</h2>
+        <button id="btnCloseOptionModal" class="modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">Option Label (標籤名稱):</label>
+          <input type="text" id="inputOptionLabel" class="form-control" placeholder="e.g. Hashimoto's thyroiditis">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Report Text (報告文字):</label>
+          <textarea id="inputOptionText" class="form-control" rows="3" placeholder="e.g. - Heterogeneous parenchymal echotexture compatible with Hashimoto's thyroiditis."></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Impression Text (顯示於 Impression 的文字，選填):</label>
+          <small style="color: #64748b; display: block; margin-bottom: 4px;">
+            當勾選此選項時，將此文字顯示於 Impression 區塊（若留空則不在 Impression 顯示）：
+          </small>
+          <textarea id="inputOptionImpression" class="form-control" rows="2" placeholder="e.g. - Chronic thyroiditis (Hashimoto's disease)."></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btnCancelOptionModal" class="btn">Cancel</button>
+        <button id="btnSaveOptionModal" class="btn btn-primary">Save Changes</button>
       </div>
     </div>
   </div>
